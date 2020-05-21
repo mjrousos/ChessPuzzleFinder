@@ -1,0 +1,5 @@
+{
+    "PuzzleDbConnectionString": "<ConnectionStringGoesHere>",
+    "StorageConnectionString": "<ConnectionStringGoesHere>",
+    "GameIngestionQueue": "games"
+}
