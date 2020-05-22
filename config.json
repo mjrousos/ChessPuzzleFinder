@@ -1,5 +1,8 @@
 {
+    "Environment": "Development",
     "PuzzleDbConnectionString": "<ConnectionStringGoesHere>",
-    "StorageConnectionString": "<ConnectionStringGoesHere>",
-    "GameIngestionQueue": "games"
+    "StorageAccountName": "",
+    "StorageAccountKey": "",
+    "GameIngestionQueue": "games",
+    "WorkerCount": 2
 }
