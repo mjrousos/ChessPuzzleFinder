@@ -4,5 +4,7 @@
     "StorageAccountName": "",
     "StorageAccountKey": "",
     "GameIngestionQueue": "games",
-    "WorkerCount": 2
+    "WorkerCount": 1,
+    "AnalysisSecondsPerMove": 10,
+    "StockfishPath": "C:\\Tools\\Stockfish\\stockfish_20011801_x64.exe"
 }
