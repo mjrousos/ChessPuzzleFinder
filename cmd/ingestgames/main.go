@@ -89,12 +89,8 @@ func processMessage(ctx context.Context, msgURL azqueue.MessagesURL) {
 
 		puzzles := tactics.FindPuzzles(ctx, g.Ucimoves)
 		log.Printf("Identified %d puzzles\n", len(puzzles))
-		writePuzzlesToDatabase(ctx, puzzles)
+		writePuzzlesToDatabase(ctx, g, puzzles)
 	}
-}
-
-func writePuzzlesToDatabase(ctx context.Context, puzzles []tactics.Puzzle) {
-	// TODO
 }
 
 // Shows app header
