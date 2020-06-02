@@ -47,7 +47,9 @@ func (state *analysisState) nextPosition() {
 func FindPuzzles(ctx context.Context, moves []string) []Puzzle {
 	log.Printf("Analyzing a game with %d moves\n", len(moves))
 
-	cmd := exec.Command(viper.GetString("StockfishPath"))
+	stockfishPath := viper.GetString("StockfishPath")
+	cmd := exec.Command(stockfishPath)
+	log.Printf("Starting %s\n", stockfishPath)
 	stockfishOut, err := cmd.StdoutPipe()
 	if err != nil {
 		log.Fatalf("Failed to pipe Stockfish output: %v\n", err)
@@ -56,7 +58,10 @@ func FindPuzzles(ctx context.Context, moves []string) []Puzzle {
 	if err != nil {
 		log.Fatalf("Failed to pipe Stockfish input: %v\n", err)
 	}
-	cmd.Start()
+	err = cmd.Start()
+	if err != nil {
+		log.Fatalf("Failed to start Stockfish: %v\n", err)
+	}
 
 	state := analysisState{puzzles: make([]Puzzle, 0), positionsAnalyzed: make(chan int, 10)}
 	done := make(chan int)
