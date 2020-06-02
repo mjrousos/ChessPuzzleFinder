@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -21,15 +22,23 @@ var pvMateRegex = regexp.MustCompile(`^info depth (?P<depth>\d+) .*multipv (?P<p
 var fenRegex = regexp.MustCompile(`^Fen: (?P<fen>.*)\n$`)
 
 type analysisState struct {
-	ready       bool
-	pvMove      string
-	pv1Score    int
-	pv1Depth    int
-	pv2Score    int
-	pv2Depth    int
-	fen         string
-	previousFen string
-	puzzles     []Puzzle
+	ready             bool
+	pvMove            string
+	pv1Score          int
+	pv1Depth          int
+	pv2Score          int
+	pv2Depth          int
+	fen               string
+	previousFen       string
+	puzzles           []Puzzle
+	positionID        int
+	positionsAnalyzed chan int
+}
+
+func (state *analysisState) nextPosition() {
+	state.positionID = rand.Int()
+	state.pv1Depth = 0
+	state.pv2Depth = 0
 }
 
 // FindPuzzles analyzes a chess game represented by a list of UCI moves
@@ -49,7 +58,7 @@ func FindPuzzles(ctx context.Context, moves []string) []Puzzle {
 	}
 	cmd.Start()
 
-	state := analysisState{puzzles: make([]Puzzle, 0)}
+	state := analysisState{puzzles: make([]Puzzle, 0), positionsAnalyzed: make(chan int, 10)}
 	done := make(chan int)
 	go processOutput(stockfishOut, &state, done)
 	initializeStockfishSession(stockfishIn)
@@ -77,19 +86,34 @@ func FindPuzzles(ctx context.Context, moves []string) []Puzzle {
 func analyzeMove(input io.WriteCloser, moves []string, nextMove string, state *analysisState) {
 	// Set position
 	setPositionCommand := fmt.Sprintf("position startpos moves %v\n", strings.Join(moves, " "))
+	state.nextPosition()
 	input.Write([]byte(setPositionCommand))
 
 	// Analyze
 	input.Write([]byte("go infinite\n"))
 
 	// Wait for analysis
-	// TODO - This could be optimized to stop after 10 seconds or depth 22 on both PV, whichever comes first (or ,really, just on depth 20; it should take that long in most cases)
-	time.Sleep(time.Duration(viper.GetInt("AnalysisSecondsPerMove")) * time.Second)
+	timeout := make(chan bool, 1)
+	go func() {
+		time.Sleep(time.Duration(viper.GetInt("AnalysisSecondsPerMove")) * time.Second)
+		timeout <- true
+	}()
+	for analysisDone := false; !analysisDone; {
+		select {
+		case <-timeout:
+			analysisDone = true
+		case puzzleEvaluated := <-state.positionsAnalyzed:
+			if puzzleEvaluated == state.positionID {
+				analysisDone = true
+			}
+		}
+	}
 
 	// Stop analysis, get FEN, and wait to make sure stdout has been written to
 	input.Write([]byte("stop\n"))
 	input.Write([]byte("d\n"))
 	time.Sleep(100 * time.Millisecond)
+	log.Printf("Evaluated: %s to depth %d\n", state.fen, min(state.pv1Depth, state.pv2Depth))
 
 	if nextMove != state.pvMove && // If the player didn't make the best move
 		abs(state.pv1Score-state.pv2Score) >= 300 && // and not making the best move was a blunder
@@ -103,8 +127,6 @@ func analyzeMove(input io.WriteCloser, moves []string, nextMove string, state *a
 		log.Printf("Found puzzle: %+v\n", newpuzzle)
 		state.puzzles = append(state.puzzles, newpuzzle)
 	}
-
-	log.Printf("Evaluated: %s\n", state.fen)
 }
 
 func processOutput(ioReader io.Reader, state *analysisState, done chan int) {
@@ -122,6 +144,8 @@ func processOutput(ioReader io.Reader, state *analysisState, done chan int) {
 }
 
 func processOutputLine(line string, state *analysisState) {
+	targetDepth := viper.GetInt("AnalysisDepth")
+
 	// If the line matches 'readyok' mark the state as ready
 	if readyRegex.Match([]byte(line)) {
 		state.ready = true
@@ -140,6 +164,9 @@ func processOutputLine(line string, state *analysisState) {
 		} else if pvScores[2] == "2" {
 			state.pv2Score = score
 			state.pv2Depth = depth
+		}
+		if state.pv1Depth >= targetDepth && state.pv2Depth >= targetDepth {
+			state.positionsAnalyzed <- state.positionID
 		}
 		return
 	}
@@ -174,6 +201,13 @@ func abs(x int) int {
 		return -x
 	}
 	return x
+}
+
+func min(x int, y int) int {
+	if x < y {
+		return x
+	}
+	return y
 }
 
 func initializeStockfishSession(input io.WriteCloser) {
