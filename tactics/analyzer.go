@@ -47,26 +47,26 @@ func (state *analysisState) nextPosition() {
 func FindPuzzles(ctx context.Context, moves []string) []Puzzle {
 	log.Printf("Analyzing a game with %d moves\n", len(moves))
 
-	stockfishPath := viper.GetString("StockfishPath")
-	cmd := exec.Command(stockfishPath)
-	log.Printf("Starting %s\n", stockfishPath)
-	stockfishOut, err := cmd.StdoutPipe()
+	enginePath := viper.GetString("EnginePath")
+	cmd := exec.Command(enginePath)
+	log.Printf("Starting %s\n", enginePath)
+	engineOut, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Fatalf("Failed to pipe Stockfish output: %v\n", err)
+		log.Fatalf("Failed to pipe engine output: %v\n", err)
 	}
-	stockfishIn, err := cmd.StdinPipe()
+	engineIn, err := cmd.StdinPipe()
 	if err != nil {
-		log.Fatalf("Failed to pipe Stockfish input: %v\n", err)
+		log.Fatalf("Failed to pipe engine input: %v\n", err)
 	}
 	err = cmd.Start()
 	if err != nil {
-		log.Fatalf("Failed to start Stockfish: %v\n", err)
+		log.Fatalf("Failed to start engine: %v\n", err)
 	}
 
 	state := analysisState{puzzles: make([]Puzzle, 0), positionsAnalyzed: make(chan int, 10)}
 	done := make(chan int)
-	go processOutput(stockfishOut, &state, done)
-	initializeStockfishSession(stockfishIn)
+	go processOutput(engineOut, &state, done)
+	initializeEngineSession(engineIn)
 
 	// The first several moves are unlikely to reveal an interesting tactic, so start iterator at 6
 	for i := 6; i < len(moves); i++ {
@@ -75,13 +75,13 @@ func FindPuzzles(ctx context.Context, moves []string) []Puzzle {
 			// If the app is interrupted, cancel analysis
 			break
 		default:
-			analyzeMove(stockfishIn, moves[:i], moves[i], &state)
+			analyzeMove(engineIn, moves[:i], moves[i], &state)
 		}
 	}
 
-	// Close Stockfish
-	stockfishIn.Write([]byte("quit"))
-	stockfishIn.Close()
+	// Close engine
+	engineIn.Write([]byte("quit"))
+	engineIn.Close()
 	cmd.Wait()
 	<-done
 
@@ -215,7 +215,7 @@ func min(x int, y int) int {
 	return y
 }
 
-func initializeStockfishSession(input io.WriteCloser) {
+func initializeEngineSession(input io.WriteCloser) {
 	input.Write([]byte("uci\n"))
 	input.Write([]byte("ucinewgame\n"))
 	input.Write([]byte("isready\n"))

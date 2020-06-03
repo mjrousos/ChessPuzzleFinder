@@ -7,5 +7,5 @@
     "WorkerCount": 1,
     "AnalysisSecondsPerMove": 12,
     "AnalysisDepth": 20,
-    "StockfishPath": "C:\\Tools\\Stockfish\\stockfish_20011801_x64.exe"
+    "EnginePath": "C:\\Tools\\Stockfish\\stockfish_20011801_x64.exe"
 }

@@ -28,7 +28,7 @@ RUN unzip stockfish-11-linux.zip \
     && chmod +x ./stockfish-11-linux/Linux/*
 
 # Viper (which we use for config) expects env var names to be capitalized
-ENV STOCKFISHPATH /stockfish-11-linux/Linux/stockfish_20011801_x64
+ENV ENGINEPATH /stockfish-11-linux/Linux/stockfish_20011801_x64
 
 # Set entrypoint
 ENTRYPOINT ["/ingestgames"]
