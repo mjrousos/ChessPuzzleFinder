@@ -169,15 +169,16 @@ go install ./cmd/ingestgames
 ### Build with Docker
 
 The included `Dockerfile` is a multi-stage build that compiles the binary
-and downloads a Linux build of Stockfish into the runtime image:
+and installs Stockfish from the Debian package repository into the
+runtime image (no manual download required):
 
 ```bash
 docker build -t chesspuzzlefinder .
 ```
 
 The resulting image bundles `config.json` and sets `ENGINEPATH` to the
-Stockfish executable that ships inside the image, so at runtime you only
-need to supply secrets/connection settings.
+packaged Stockfish binary at `/usr/games/stockfish`, so at runtime you
+only need to supply secrets/connection settings.
 
 ## Running
 
