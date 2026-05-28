@@ -202,8 +202,11 @@ only need to supply secrets/connection settings.
 
 The process will print a banner, log how many workers it started, and then
 loop forever dequeueing and analyzing games. Press `Ctrl+C` (or send
-`SIGTERM`) to shut down — in-flight workers are canceled cooperatively and
-the process exits cleanly.
+`SIGTERM`) to shut down. Cancellation is best-effort: workers stop
+picking up new queue messages, but any analysis already in flight runs
+to completion (the analyzer doesn't check the cancellation context
+mid-`analyzeMove`, so each in-progress move finishes its full
+`AnalysisSecondsPerMove` budget before the worker exits).
 
 Typical startup output:
 
