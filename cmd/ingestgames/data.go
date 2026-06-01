@@ -12,7 +12,7 @@ import (
 	// Preface this with an _ since it is needed at runtime for
 	// loading the mssql driver but appears (to the compiler) to
 	// not be used.
-	_ "github.com/denisenkom/go-mssqldb"
+	_ "github.com/microsoft/go-mssqldb"
 )
 
 const insertPuzzleQuery = `INSERT INTO Puzzles (
