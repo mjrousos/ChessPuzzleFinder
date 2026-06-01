@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
+	"math/rand/v2"
 	"os/exec"
 	"regexp"
 	"strconv"
