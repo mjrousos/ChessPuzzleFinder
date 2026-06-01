@@ -33,33 +33,27 @@ func main() {
 
 	log.Printf("Processing games from queue \"%s\" with %d workers\n", queueName, workerCount)
 
-	// Create cancelable context and a WaitGroup
-	ctx, cancel := context.WithCancel(context.Background())
-	wg := sync.WaitGroup{}
+	// Cancel work on SIGINT/SIGTERM via signal.NotifyContext (Go 1.16+).
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	// Start workerCount workers
+	wg := sync.WaitGroup{}
 	wg.Add(workerCount)
 	for i := 0; i < workerCount; i++ {
 		go processMessages(ctx, &wg, msgURL)
 	}
 
-	// Clean-up on exit (cancel workers and wait for them to finish)
-	defer func() {
-		log.Println("Canceling game processing...")
-		cancel()
-		wg.Wait()
-		log.Println("- Done -")
-	}()
-
-	waitForExit()
+	<-ctx.Done()
+	log.Println("Canceling game processing...")
+	wg.Wait()
+	log.Println("- Done -")
 }
 
 func processMessages(ctx context.Context, wg *sync.WaitGroup, msgURL azqueue.MessagesURL) {
+	defer wg.Done()
 	for {
 		select {
 		case <-ctx.Done():
-			// Context canceled
-			wg.Done()
 			return
 		default:
 			processMessage(ctx, msgURL)
@@ -134,12 +128,4 @@ func getQueueMessageURL(storageAccountName string, storageAccountKey string, que
 	}
 
 	return azqueue.NewQueueURL(*url, azqueue.NewPipeline(credential, azqueue.PipelineOptions{})).NewMessagesURL()
-}
-
-// Hook and wait for ctrl-c interrupt
-func waitForExit() {
-	interrupt := make(chan os.Signal)
-	signal.Notify(interrupt, os.Interrupt, syscall.SIGTERM)
-	sig := <-interrupt
-	log.Printf("Received %s\n", sig)
 }
