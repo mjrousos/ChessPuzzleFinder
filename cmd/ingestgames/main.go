@@ -5,16 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
-	"time"
 
-	"github.com/Azure/azure-storage-queue-go/azqueue"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azqueue/v2"
 	"github.com/mjrousos/ChessPuzzleFinder/tactics"
 	"github.com/spf13/viper"
 )
@@ -29,7 +28,7 @@ func main() {
 	queueName := viper.GetString("GameIngestionQueue")
 	workerCount := viper.GetInt("WorkerCount")
 
-	msgURL := getQueueMessageURL(storageAccountName, storageAccountKey, queueName)
+	queueClient := newQueueClient(storageAccountName, storageAccountKey, queueName)
 
 	log.Printf("Processing games from queue \"%s\" with %d workers\n", queueName, workerCount)
 
@@ -40,7 +39,7 @@ func main() {
 	wg := sync.WaitGroup{}
 	wg.Add(workerCount)
 	for i := 0; i < workerCount; i++ {
-		go processMessages(ctx, &wg, msgURL)
+		go processMessages(ctx, &wg, queueClient)
 	}
 
 	<-ctx.Done()
@@ -49,37 +48,47 @@ func main() {
 	log.Println("- Done -")
 }
 
-func processMessages(ctx context.Context, wg *sync.WaitGroup, msgURL azqueue.MessagesURL) {
+func processMessages(ctx context.Context, wg *sync.WaitGroup, queueClient *azqueue.QueueClient) {
 	defer wg.Done()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			processMessage(ctx, msgURL)
+			processMessage(ctx, queueClient)
 		}
 	}
 }
 
-func processMessage(ctx context.Context, msgURL azqueue.MessagesURL) {
-	response, err := msgURL.Dequeue(ctx, 1, 30*time.Second)
+func processMessage(ctx context.Context, queueClient *azqueue.QueueClient) {
+	resp, err := queueClient.DequeueMessages(ctx, &azqueue.DequeueMessagesOptions{
+		NumberOfMessages:  to.Ptr(int32(1)),
+		VisibilityTimeout: to.Ptr(int32(30)),
+	})
 	if err != nil {
 		log.Println("Error dequeueing message: ", err)
 		return
 	}
 
-	for i := int32(0); i < response.NumMessages(); i++ {
-		msg := response.Message(i)
-		log.Printf("Received message %s (%d bytes)\n", msg.ID, len(msg.Text))
-		dec := json.NewDecoder(strings.NewReader(msg.Text))
+	for _, msg := range resp.Messages {
+		if msg.MessageText == nil || msg.MessageID == nil || msg.PopReceipt == nil {
+			log.Println("Skipping malformed message with missing fields")
+			continue
+		}
+		messageID := *msg.MessageID
+		body := *msg.MessageText
+		log.Printf("Received message %s (%d bytes)\n", messageID, len(body))
+
+		dec := json.NewDecoder(strings.NewReader(body))
 		var g game
-		err := dec.Decode(&g)
-		if err != nil {
+		if err := dec.Decode(&g); err != nil {
 			log.Println("Error decoding json: ", err)
 			continue
 		}
 		log.Printf("Processing game %s\n", g.GameURL)
-		msgURL.NewMessageIDURL(msg.ID).Delete(ctx, msg.PopReceipt)
+		if _, err := queueClient.DeleteMessage(ctx, messageID, *msg.PopReceipt, nil); err != nil {
+			log.Println("Error deleting message: ", err)
+		}
 
 		puzzles := tactics.FindPuzzles(ctx, g.Ucimoves)
 		log.Printf("Identified %d puzzles\n", len(puzzles))
@@ -116,16 +125,17 @@ func configure() {
 	production = "Development" == viper.GetString("Environment")
 }
 
-func getQueueMessageURL(storageAccountName string, storageAccountKey string, queueName string) azqueue.MessagesURL {
-	credential, err := azqueue.NewSharedKeyCredential(storageAccountName, storageAccountKey)
+func newQueueClient(storageAccountName, storageAccountKey, queueName string) *azqueue.QueueClient {
+	cred, err := azqueue.NewSharedKeyCredential(storageAccountName, storageAccountKey)
 	if err != nil {
 		log.Fatal("Error creating credentials: ", err)
 	}
 
-	url, err := url.Parse(fmt.Sprintf("https://%s.queue.core.windows.net/%s", storageAccountName, queueName))
+	serviceURL := fmt.Sprintf("https://%s.queue.core.windows.net/", storageAccountName)
+	svc, err := azqueue.NewServiceClientWithSharedKeyCredential(serviceURL, cred, nil)
 	if err != nil {
-		log.Fatal("Error parsing url: ", err)
+		log.Fatal("Error creating queue service client: ", err)
 	}
 
-	return azqueue.NewQueueURL(*url, azqueue.NewPipeline(credential, azqueue.PipelineOptions{})).NewMessagesURL()
+	return svc.NewQueueClient(queueName)
 }
