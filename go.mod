@@ -6,7 +6,6 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.1
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azqueue/v2 v2.1.0
 	github.com/microsoft/go-mssqldb v1.10.0
-	github.com/pkg/errors v0.9.1
 	github.com/spf13/viper v1.21.0
 )
 
