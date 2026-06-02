@@ -81,8 +81,11 @@ func processMessages(ctx context.Context, wg *sync.WaitGroup, queueClient *azque
 	}
 }
 
-// processMessage dequeues at most one message and returns true if a message
-// was processed (so the caller knows whether to back off before re-polling).
+// processMessage dequeues at most one message and returns true if at least
+// one message was dequeued — including malformed or undecodable ones, which
+// are deleted to drain them from the queue. Returning true here suppresses
+// the worker's empty-queue backoff so polling stays responsive whenever the
+// queue has *any* activity.
 func processMessage(ctx context.Context, queueClient *azqueue.QueueClient) bool {
 	resp, err := queueClient.DequeueMessages(ctx, &azqueue.DequeueMessagesOptions{
 		NumberOfMessages:  to.Ptr(int32(1)),
@@ -97,18 +100,37 @@ func processMessage(ctx context.Context, queueClient *azqueue.QueueClient) bool 
 	}
 
 	for _, msg := range resp.Messages {
-		if msg.MessageText == nil || msg.MessageID == nil || msg.PopReceipt == nil {
-			log.Println("Skipping malformed message with missing fields")
+		// If MessageID or PopReceipt are missing we can't delete; just log
+		// and continue. The message will eventually be re-delivered and may
+		// be re-skipped — this branch is essentially "never happens" against
+		// a real Azure Queue service.
+		if msg.MessageID == nil || msg.PopReceipt == nil {
+			log.Println("Skipping message with missing MessageID or PopReceipt")
 			continue
 		}
 		messageID := *msg.MessageID
+		popReceipt := *msg.PopReceipt
+
+		// Drain malformed messages (nil body or undecodable JSON) so they
+		// don't cycle as poison messages — the body won't become valid on
+		// retry, so retrying just wedges the queue.
+		if msg.MessageText == nil {
+			log.Printf("Deleting message %s with nil MessageText\n", messageID)
+			if _, err := queueClient.DeleteMessage(ctx, messageID, popReceipt, nil); err != nil {
+				log.Println("Error deleting malformed message: ", err)
+			}
+			continue
+		}
 		body := *msg.MessageText
 		log.Printf("Received message %s (%d bytes)\n", messageID, len(body))
 
 		dec := json.NewDecoder(strings.NewReader(body))
 		var g game
 		if err := dec.Decode(&g); err != nil {
-			log.Println("Error decoding json: ", err)
+			log.Printf("Deleting message %s after JSON decode error: %v\n", messageID, err)
+			if _, err := queueClient.DeleteMessage(ctx, messageID, popReceipt, nil); err != nil {
+				log.Println("Error deleting undecodable message: ", err)
+			}
 			continue
 		}
 		log.Printf("Processing game %s\n", g.GameURL)
@@ -122,7 +144,7 @@ func processMessage(ctx context.Context, queueClient *azqueue.QueueClient) bool 
 		// both call log.Fatal on unrecoverable errors), the message stays
 		// invisible until visibilityTimeoutSeconds expires and then becomes
 		// eligible for re-delivery to another worker — no data loss.
-		if _, err := queueClient.DeleteMessage(ctx, messageID, *msg.PopReceipt, nil); err != nil {
+		if _, err := queueClient.DeleteMessage(ctx, messageID, popReceipt, nil); err != nil {
 			log.Println("Error deleting message: ", err)
 		}
 	}

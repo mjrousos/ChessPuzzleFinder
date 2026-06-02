@@ -10,8 +10,12 @@ func TestNewMove(t *testing.T) {
 		wantTo      string
 		wantPromote ChessPiece
 	}{
-		{"plain move", "e2e4", "e2", "e4", WhiteKing},                            // WhiteKing == 0 == "no promotion" sentinel
-		{"non-promoting knight move", "g1f3", "g1", "f3", WhiteKing},             // 4-char moves never promote (UCI doesn't encode captures)
+		// Non-promotion cases: NewMove leaves PiecePromotedTo at the zero
+		// value (the production code in data.go uses this zero-value
+		// convention as the "no promotion" sentinel). Assert ChessPiece(0)
+		// directly rather than coupling the test to WhiteKing's iota value.
+		{"plain move", "e2e4", "e2", "e4", ChessPiece(0)},
+		{"non-promoting knight move", "g1f3", "g1", "f3", ChessPiece(0)}, // UCI doesn't encode captures
 		{"promote queen lower", "a7a8q", "a7", "a8", WhiteQueen},
 		{"promote queen upper", "a7a8Q", "a7", "a8", WhiteQueen},
 		{"promote rook lower", "h2h1r", "h2", "h1", WhiteRook},
