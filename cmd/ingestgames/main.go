@@ -155,11 +155,24 @@ func processMessage(ctx context.Context, queueClient *azqueue.QueueClient) bool 
 		log.Printf("Identified %d puzzles\n", len(puzzles))
 		writePuzzlesToDatabase(ctx, g, puzzles)
 
+		// If the worker context was canceled during analysis or DB write,
+		// the work for this message may be incomplete (writePuzzlesToDatabase
+		// returns early on ctx.Done; FindPuzzles likewise checks ctx between
+		// moves). Skip the final delete so the message becomes eligible for
+		// re-delivery after visibilityTimeoutSeconds — accepting possible
+		// duplicate puzzle rows on retry rather than silently losing the
+		// remaining work.
+		if ctx.Err() != nil {
+			log.Printf("Skipping delete of message %s: worker context canceled mid-processing\n", messageID)
+			continue
+		}
+
 		// Delete only after analysis + DB write succeed. Uses a detached
-		// context (see deleteMessage) so that a SIGINT/SIGTERM right after
-		// the DB write doesn't cause this final delete to fail with
-		// `context canceled` and re-deliver an already-completed message
-		// (which would otherwise produce duplicate puzzle rows on retry).
+		// context (see deleteMessage) so that a SIGINT/SIGTERM that arrives
+		// *between* the ctx.Err check above and this call doesn't cause
+		// the final delete to fail with `context canceled` and re-deliver
+		// an already-completed message (which would otherwise produce
+		// duplicate puzzle rows on retry).
 		if err := deleteMessage(queueClient, messageID, popReceipt); err != nil {
 			log.Println("Error deleting message: ", err)
 		}
