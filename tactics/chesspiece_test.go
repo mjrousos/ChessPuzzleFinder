@@ -42,25 +42,26 @@ func TestChessPiece_IsWhite(t *testing.T) {
 
 func TestChessPiece_String(t *testing.T) {
 	tests := []struct {
+		name  string
 		piece ChessPiece
 		want  string
 	}{
-		{WhiteKing, "K"},
-		{BlackKing, "K"},
-		{WhiteQueen, "Q"},
-		{BlackQueen, "Q"},
-		{WhiteRook, "R"},
-		{BlackRook, "R"},
-		{WhiteBishop, "B"},
-		{BlackBishop, "B"},
-		{WhiteKnight, "N"},
-		{BlackKnight, "N"},
-		{WhitePawn, ""},
-		{BlackPawn, ""},
-		{ChessPiece(99), "InvalidPiece"},
+		{"WhiteKing", WhiteKing, "K"},
+		{"BlackKing", BlackKing, "K"},
+		{"WhiteQueen", WhiteQueen, "Q"},
+		{"BlackQueen", BlackQueen, "Q"},
+		{"WhiteRook", WhiteRook, "R"},
+		{"BlackRook", BlackRook, "R"},
+		{"WhiteBishop", WhiteBishop, "B"},
+		{"BlackBishop", BlackBishop, "B"},
+		{"WhiteKnight", WhiteKnight, "N"},
+		{"BlackKnight", BlackKnight, "N"},
+		{"WhitePawn", WhitePawn, ""},
+		{"BlackPawn", BlackPawn, ""},
+		{"OutOfRange", ChessPiece(99), "InvalidPiece"},
 	}
 	for _, tc := range tests {
-		t.Run(tc.want+"_"+tc.piece.String(), func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.piece.String(); got != tc.want {
 				t.Errorf("String() = %q, want %q", got, tc.want)
 			}

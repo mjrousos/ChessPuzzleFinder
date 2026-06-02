@@ -54,6 +54,14 @@ func main() {
 // service when the queue is idle. Cancelable via the worker's context.
 const emptyQueueBackoff = 5 * time.Second
 
+// visibilityTimeoutSeconds is how long a dequeued message stays invisible to
+// other workers before becoming eligible for re-delivery. Puzzle analysis is
+// CPU-bound (Stockfish runs for AnalysisSecondsPerMove on every move from
+// move 6 onward), so a typical game can take several minutes to process.
+// 10 minutes covers most games at the default 12s/move; if a worker crashes
+// mid-game the message will be retried by another worker after this window.
+const visibilityTimeoutSeconds = int32(600)
+
 func processMessages(ctx context.Context, wg *sync.WaitGroup, queueClient *azqueue.QueueClient) {
 	defer wg.Done()
 	for {
@@ -78,7 +86,7 @@ func processMessages(ctx context.Context, wg *sync.WaitGroup, queueClient *azque
 func processMessage(ctx context.Context, queueClient *azqueue.QueueClient) bool {
 	resp, err := queueClient.DequeueMessages(ctx, &azqueue.DequeueMessagesOptions{
 		NumberOfMessages:  to.Ptr(int32(1)),
-		VisibilityTimeout: to.Ptr(int32(30)),
+		VisibilityTimeout: to.Ptr(visibilityTimeoutSeconds),
 	})
 	if err != nil {
 		log.Println("Error dequeueing message: ", err)
@@ -104,13 +112,19 @@ func processMessage(ctx context.Context, queueClient *azqueue.QueueClient) bool 
 			continue
 		}
 		log.Printf("Processing game %s\n", g.GameURL)
-		if _, err := queueClient.DeleteMessage(ctx, messageID, *msg.PopReceipt, nil); err != nil {
-			log.Println("Error deleting message: ", err)
-		}
 
 		puzzles := tactics.FindPuzzles(ctx, g.Ucimoves)
 		log.Printf("Identified %d puzzles\n", len(puzzles))
 		writePuzzlesToDatabase(ctx, g, puzzles)
+
+		// Delete only after analysis + DB write succeed. If either step
+		// terminates the process (FindPuzzles and writePuzzlesToDatabase
+		// both call log.Fatal on unrecoverable errors), the message stays
+		// invisible until visibilityTimeoutSeconds expires and then becomes
+		// eligible for re-delivery to another worker — no data loss.
+		if _, err := queueClient.DeleteMessage(ctx, messageID, *msg.PopReceipt, nil); err != nil {
+			log.Println("Error deleting message: ", err)
+		}
 	}
 	return true
 }
