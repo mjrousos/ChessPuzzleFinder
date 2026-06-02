@@ -81,6 +81,22 @@ func processMessages(ctx context.Context, wg *sync.WaitGroup, queueClient *azque
 	}
 }
 
+// deleteMessageTimeout bounds how long we wait when deleting an
+// already-processed (or malformed) message. The delete runs on a detached
+// background context so SIGINT/SIGTERM during shutdown doesn't cause the
+// final delete to fail with `context canceled`, which would re-deliver a
+// message we've already finished processing and produce duplicate DB rows.
+const deleteMessageTimeout = 10 * time.Second
+
+// deleteMessage removes msg from the queue using a detached, short-deadline
+// context so the call survives worker-context cancellation during shutdown.
+func deleteMessage(queueClient *azqueue.QueueClient, messageID, popReceipt string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), deleteMessageTimeout)
+	defer cancel()
+	_, err := queueClient.DeleteMessage(ctx, messageID, popReceipt, nil)
+	return err
+}
+
 // processMessage dequeues at most one message and returns true if at least
 // one message was dequeued — including malformed or undecodable ones, which
 // are deleted to drain them from the queue. Returning true here suppresses
@@ -116,7 +132,7 @@ func processMessage(ctx context.Context, queueClient *azqueue.QueueClient) bool 
 		// retry, so retrying just wedges the queue.
 		if msg.MessageText == nil {
 			log.Printf("Deleting message %s with nil MessageText\n", messageID)
-			if _, err := queueClient.DeleteMessage(ctx, messageID, popReceipt, nil); err != nil {
+			if err := deleteMessage(queueClient, messageID, popReceipt); err != nil {
 				log.Println("Error deleting malformed message: ", err)
 			}
 			continue
@@ -128,7 +144,7 @@ func processMessage(ctx context.Context, queueClient *azqueue.QueueClient) bool 
 		var g game
 		if err := dec.Decode(&g); err != nil {
 			log.Printf("Deleting message %s after JSON decode error: %v\n", messageID, err)
-			if _, err := queueClient.DeleteMessage(ctx, messageID, popReceipt, nil); err != nil {
+			if err := deleteMessage(queueClient, messageID, popReceipt); err != nil {
 				log.Println("Error deleting undecodable message: ", err)
 			}
 			continue
@@ -139,12 +155,12 @@ func processMessage(ctx context.Context, queueClient *azqueue.QueueClient) bool 
 		log.Printf("Identified %d puzzles\n", len(puzzles))
 		writePuzzlesToDatabase(ctx, g, puzzles)
 
-		// Delete only after analysis + DB write succeed. If either step
-		// terminates the process (FindPuzzles and writePuzzlesToDatabase
-		// both call log.Fatal on unrecoverable errors), the message stays
-		// invisible until visibilityTimeoutSeconds expires and then becomes
-		// eligible for re-delivery to another worker — no data loss.
-		if _, err := queueClient.DeleteMessage(ctx, messageID, popReceipt, nil); err != nil {
+		// Delete only after analysis + DB write succeed. Uses a detached
+		// context (see deleteMessage) so that a SIGINT/SIGTERM right after
+		// the DB write doesn't cause this final delete to fail with
+		// `context canceled` and re-deliver an already-completed message
+		// (which would otherwise produce duplicate puzzle rows on retry).
+		if err := deleteMessage(queueClient, messageID, popReceipt); err != nil {
 			log.Println("Error deleting message: ", err)
 		}
 	}
