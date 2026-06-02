@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azqueue/v2"
@@ -48,26 +49,43 @@ func main() {
 	log.Println("- Done -")
 }
 
+// emptyQueueBackoff is how long a worker waits before re-polling after a
+// dequeue that returns no messages. Prevents hot-polling against the queue
+// service when the queue is idle. Cancelable via the worker's context.
+const emptyQueueBackoff = 5 * time.Second
+
 func processMessages(ctx context.Context, wg *sync.WaitGroup, queueClient *azqueue.QueueClient) {
 	defer wg.Done()
 	for {
+		if ctx.Err() != nil {
+			return
+		}
+		gotWork := processMessage(ctx, queueClient)
+		if gotWork {
+			continue
+		}
+		// Empty dequeue: back off, but stay cancelable so shutdown is prompt.
 		select {
 		case <-ctx.Done():
 			return
-		default:
-			processMessage(ctx, queueClient)
+		case <-time.After(emptyQueueBackoff):
 		}
 	}
 }
 
-func processMessage(ctx context.Context, queueClient *azqueue.QueueClient) {
+// processMessage dequeues at most one message and returns true if a message
+// was processed (so the caller knows whether to back off before re-polling).
+func processMessage(ctx context.Context, queueClient *azqueue.QueueClient) bool {
 	resp, err := queueClient.DequeueMessages(ctx, &azqueue.DequeueMessagesOptions{
 		NumberOfMessages:  to.Ptr(int32(1)),
 		VisibilityTimeout: to.Ptr(int32(30)),
 	})
 	if err != nil {
 		log.Println("Error dequeueing message: ", err)
-		return
+		return false
+	}
+	if len(resp.Messages) == 0 {
+		return false
 	}
 
 	for _, msg := range resp.Messages {
@@ -94,6 +112,7 @@ func processMessage(ctx context.Context, queueClient *azqueue.QueueClient) {
 		log.Printf("Identified %d puzzles\n", len(puzzles))
 		writePuzzlesToDatabase(ctx, g, puzzles)
 	}
+	return true
 }
 
 // Shows app header

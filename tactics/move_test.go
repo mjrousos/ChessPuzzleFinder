@@ -11,7 +11,7 @@ func TestNewMove(t *testing.T) {
 		wantPromote ChessPiece
 	}{
 		{"plain move", "e2e4", "e2", "e4", WhiteKing},                            // WhiteKing == 0 == "no promotion" sentinel
-		{"capture", "g1f3", "g1", "f3", WhiteKing},                               // 4-char moves never promote
+		{"non-promoting knight move", "g1f3", "g1", "f3", WhiteKing},             // 4-char moves never promote (UCI doesn't encode captures)
 		{"promote queen lower", "a7a8q", "a7", "a8", WhiteQueen},
 		{"promote queen upper", "a7a8Q", "a7", "a8", WhiteQueen},
 		{"promote rook lower", "h2h1r", "h2", "h1", WhiteRook},

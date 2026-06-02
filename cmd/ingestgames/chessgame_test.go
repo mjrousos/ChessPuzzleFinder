@@ -7,10 +7,13 @@ import (
 	"time"
 )
 
-// TestGameJSONRoundTrip locks in the wire shape that the Azure Queue
-// producer sends and the worker decodes. Any drift in a `json:"..."` tag
-// on the `game` struct will fail this test, which is the contract the
-// azqueue/v2 dequeue path relies on.
+// TestGameJSONRoundTrip locks in the JSON wire shape that the Azure Queue
+// producer sends and the worker decodes. The initial json.Unmarshal of the
+// literal `raw` document is what catches a `json:"..."` tag rename — if any
+// tag changes, the corresponding field on `game` will be left at its zero
+// value and one of the per-field assertions below will fail. The round-trip
+// at the end is a weaker check: it only confirms struct values survive a
+// marshal/unmarshal with the *current* tag set.
 func TestGameJSONRoundTrip(t *testing.T) {
 	const raw = `{
 		"GameUrl": "https://lichess.org/abcd1234",
@@ -50,7 +53,10 @@ func TestGameJSONRoundTrip(t *testing.T) {
 		t.Errorf("Blackplayername = %q, want Bob", g.Blackplayername)
 	}
 
-	// Round-trip: marshal back and confirm every json tag is preserved.
+	// Round-trip: marshal back and unmarshal into a fresh game. This only
+	// asserts that struct values survive an encode/decode cycle with the
+	// current tag set — it does not by itself catch a tag rename (the
+	// literal `raw` decode above does).
 	out, err := json.Marshal(g)
 	if err != nil {
 		t.Fatalf("Marshal failed: %v", err)
@@ -67,10 +73,20 @@ func TestGameJSONRoundTrip(t *testing.T) {
 func TestGameSiteEnum(t *testing.T) {
 	// The data.go writer treats Site=0 as lichess.org and Site=1 as
 	// chess.com. Confirm the JSON contract preserves those exact ints.
-	for _, raw := range []string{`{"Site": 0}`, `{"Site": 1}`} {
+	tests := []struct {
+		raw      string
+		wantSite int
+	}{
+		{`{"Site": 0}`, 0},
+		{`{"Site": 1}`, 1},
+	}
+	for _, tc := range tests {
 		var g game
-		if err := json.Unmarshal([]byte(raw), &g); err != nil {
-			t.Fatalf("Unmarshal(%q) failed: %v", raw, err)
+		if err := json.Unmarshal([]byte(tc.raw), &g); err != nil {
+			t.Fatalf("Unmarshal(%q) failed: %v", tc.raw, err)
+		}
+		if g.Site != tc.wantSite {
+			t.Errorf("Unmarshal(%q) Site = %d, want %d", tc.raw, g.Site, tc.wantSite)
 		}
 	}
 }
