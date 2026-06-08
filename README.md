@@ -42,8 +42,8 @@ heuristic.
 
 To build and run the app you need:
 
-- **Go** 1.14 or newer (`go version`). The module currently targets Go 1.14
-  in `go.mod` but builds with any modern Go release.
+- **Go** 1.26 or newer (`go version`). The module targets Go 1.26 in
+  `go.mod`; older toolchains will refuse to build it.
 - **A UCI chess engine.** The app is developed and tested against
   [Stockfish](https://stockfishchess.org/) and relies on a few
   Stockfish-flavored behaviors beyond plain UCI: the `d` command (which

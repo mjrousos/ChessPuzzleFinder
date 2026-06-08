@@ -1,6 +1,6 @@
 package tactics
 
-import "github.com/pkg/errors"
+import "errors"
 
 // ChessPiece represents a combination of color and type of piece.
 type ChessPiece int
